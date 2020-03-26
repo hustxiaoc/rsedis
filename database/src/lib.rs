@@ -606,6 +606,23 @@ impl Value {
             _ => return Err(OperationError::WrongTypeError),
         })
     }
+
+    pub fn hgetall(&self) -> Result<Vec<Vec<u8>>, OperationError> {
+        let mut list = vec![];
+
+        match *self {
+            Value::Nil => {},
+            Value::Map(ref map) => {
+                for (key, val) in map {
+                    list.push(key.to_vec());
+                    list.push(val.to_vec());
+                }
+            },
+            _ => return Err(OperationError::WrongTypeError)
+        };
+
+        Ok(list)
+    }
     /// Takes an element from a list.
     ///
     /// # Examples

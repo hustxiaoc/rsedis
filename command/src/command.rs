@@ -686,6 +686,27 @@ fn hget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respon
     }
 }
 
+fn hgetall(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 2, "Wrong number of parameters, expected 2");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let el = match db.get(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Array(Vec::new()),
+    };
+
+    match el.hgetall() {
+        Ok(items) => {
+            if items.len() > 0 {
+                Response::Array(items.iter().map(|i| Response::Data(i.to_vec())).collect())
+            } else {
+                Response::Array(Vec::new())
+            }
+        }
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+
 
 fn generic_push(
     parser: &mut ParsedCommand,
@@ -2768,6 +2789,7 @@ fn execute_command(
     return Ok(match command_name {
         "hset" => hset(parser, db, dbindex),
         "hget" => hget(parser, db, dbindex),
+        "hgetall" => hgetall(parser, db, dbindex),
         "pexpireat" => pexpireat(parser, db, dbindex),
         "pexpire" => pexpire(parser, db, dbindex),
         "expireat" => expireat(parser, db, dbindex),
