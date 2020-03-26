@@ -9,7 +9,9 @@ use config::Config;
 use logger::{Level, Logger};
 use networking::Server;
 
-fn main() {
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::new(Logger::new(Level::Notice));
     match args().nth(1) {
         Some(f) => match config.parsefile(f) {
@@ -23,7 +25,7 @@ fn main() {
     let (port, daemonize) = (config.port, config.daemonize);
     let mut server = Server::new(config);
     {
-        let mut db = server.get_mut_db();
+        let mut db = server.get_mut_db().await;
         db.git_sha1 = GIT_SHA1;
         db.git_dirty = GIT_DIRTY;
         db.version = env!("CARGO_PKG_VERSION");
@@ -34,5 +36,7 @@ fn main() {
         println!("Port: {}", port);
         println!("PID: {}", getpid());
     }
-    server.run();
+    server.start().await?;
+
+    Ok(())
 }
