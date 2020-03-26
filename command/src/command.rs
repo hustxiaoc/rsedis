@@ -1,8 +1,9 @@
 use std::collections::{Bound, HashMap, HashSet};
 use std::io::Write;
 use std::mem::replace;
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Sender;
+// use std::sync::mpsc::channel;
+// use std::sync::mpsc::Sender;
+use tokio::sync::mpsc::{unbounded_channel as channel, UnboundedReceiver, UnboundedSender as Sender};
 use std::thread;
 use std::time::Duration;
 use std::usize;
@@ -856,8 +857,8 @@ fn brpoplpush(
         return Ok(r);
     }
 
-    let (txkey, rxkey) = channel();
-    let (txcommand, rxcommand) = channel();
+    let (txkey, mut rxkey) = channel();
+    let (txcommand, mut rxcommand) = channel();
     if timeout > 0 {
         let tx = txcommand.clone();
         thread::spawn(move || {
@@ -867,8 +868,8 @@ fn brpoplpush(
     }
     let command_name = try_opt_validate!(parser.get_vec(0), "Invalid command");
     db.key_subscribe(dbindex, &source, txkey);
-    thread::spawn(move || {
-        let _ = rxkey.recv();
+    tokio::spawn(async move {
+        let _ = rxkey.recv().await;
         let newtimeout = if timeout == 0 {
             0
         } else {
@@ -944,7 +945,7 @@ fn generic_bpop(
         "ERR timeout is not an integer"
     );
 
-    let (txkey, rxkey) = channel();
+    let (txkey, mut rxkey) = channel();
     let (txcommand, rxcommand) = channel();
     if timeout > 0 {
         let tx = txcommand.clone();
@@ -957,8 +958,9 @@ fn generic_bpop(
     for key in keys.iter() {
         db.key_subscribe(dbindex, key, txkey.clone());
     }
-    thread::spawn(move || {
-        let _ = rxkey.recv();
+
+    tokio::spawn(async move  {
+        let _ = rxkey.recv().await;
         let newtimeout = if timeout == 0 {
             0
         } else {
@@ -2260,16 +2262,18 @@ fn monitor(
     rawsender: Sender<Option<Response>>,
 ) -> Response {
     validate_arguments_exact!(parser, 1);
-    let (tx, rx) = channel();
+    let (tx, mut rx) = channel();
     db.monitor_add(tx);
-    thread::spawn(move || loop {
-        let r = match rx.recv() {
-            Ok(r) => r,
-            Err(_) => break,
-        };
-        match rawsender.send(Some(Response::Status(r))) {
-            Ok(_) => (),
-            Err(_) => break,
+    tokio::spawn( async move {
+        loop {
+            let r = match rx.recv().await {
+                Some(r) => r,
+                _ => break,
+            };
+            match rawsender.send(Some(Response::Status(r))) {
+                Ok(_) => (),
+                Err(_) => break,
+            }
         }
     });
     Response::Status("OK".to_owned())

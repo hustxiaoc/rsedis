@@ -6,6 +6,7 @@ extern crate logger;
 extern crate parser;
 extern crate response;
 extern crate util;
+extern crate tokio;
 
 pub mod aof;
 pub mod command;

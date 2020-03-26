@@ -1,11 +1,12 @@
 use std::io::Read;
-use std::sync::mpsc::channel;
+// use std::sync::mpsc::channel;
+use tokio::sync::mpsc::{unbounded_channel as channel, UnboundedReceiver, UnboundedSender as Sender};
 
 use database::Database;
 use logger::Level;
 use parser::{ParseError, Parser};
 
-use command;
+use crate::command;
 
 const UNEXPECTED_END: &'static str =
     "Unexpected end of file reading the append only file. You can: 1) Make a backup of your AOF \

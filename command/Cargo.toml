@@ -2,6 +2,10 @@
 name = "command"
 version = "0.1.0"
 authors = ["Sebastian Waisbrot <seppo0010@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+tokio = { version = "0.2.13", features = ["full"] }
 
 [dependencies.compat]
 path = "../compat"

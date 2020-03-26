@@ -8,7 +8,7 @@ crc64 = "0.2.2"
 rand = "0.3"
 rehashinghashmap = "0.1.0"
 skiplist = "0.3.0"
-
+tokio = { version = "0.2.13", features = ["full"] }
 #[dependencies.skiplist]
 #git = "https://github.com/rust-redis/rust-skiplist.git"
 

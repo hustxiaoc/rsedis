@@ -12,6 +12,8 @@ extern crate response;
 extern crate skiplist;
 extern crate util;
 
+extern crate tokio;
+
 pub mod dbutil;
 pub mod error;
 pub mod list;
@@ -27,7 +29,8 @@ use std::io::Write;
 use std::iter::FromIterator;
 use std::ops::RangeFull;
 use std::path::Path;
-use std::sync::mpsc::Sender;
+// use std::sync::mpsc::Sender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender as Sender};
 
 use config::Config;
 use crc64::crc64;

@@ -58,8 +58,8 @@ impl Stream {
     /// Creates a new independently owned handle to the underlying socket.
     fn try_clone(&self) -> io::Result<Stream> {
         match *self {
-            Stream::Tcp(ref s) => Ok(Stream::Tcp(try!(s.try_clone()))),
-            Stream::Unix(ref s) => Ok(Stream::Unix(try!(s.try_clone()))),
+            Stream::Tcp(ref s) => Ok(Stream::Tcp(s.try_clone()?)),
+            Stream::Unix(ref s) => Ok(Stream::Unix(s.try_clone()?)),
         }
     }
 
@@ -118,7 +118,7 @@ impl Stream {
     /// Creates a new independently owned handle to the underlying socket.
     fn try_clone(&self) -> io::Result<Stream> {
         match *self {
-            Stream::Tcp(ref s) => Ok(Stream::Tcp(try!(s.try_clone()))),
+            Stream::Tcp(ref s) => Ok(Stream::Tcp(s.try_clone()?)),
         }
     }
 
@@ -232,20 +232,37 @@ impl Client {
         });
     }
 
-    /// Runs all clients commands. The function loops until the client
-    /// disconnects.
-    pub fn run(&mut self, sender: Sender<(Level, String)>) {
-        #![allow(unused_must_use)]
-        let (stream_tx, rx) = channel::<Option<Response>>();
-        self.create_writer_thread(sender.clone(), rx);
+    pub async fn process(mut stream: tokio::net::TcpStream, db: Arc<Mutex<Database>>, id: usize) {
+        use tokio::sync::mpsc::unbounded_channel;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let mut client = command::Client::new(stream_tx.clone(), self.id);
+        let (stream_tx, mut rx) = unbounded_channel::<Option<Response>>();
+        let (mut reader, mut writer) = tokio::io::split(stream);
+
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Some(m) => match m {
+                        Some(msg) => match writer.write(&*msg.as_bytes()).await {
+                            Ok(_) => (),
+                            Err(e) => {
+                                // sendlog!(sender, Warning, "Error writing to client: {:?}", e).unwrap()
+                            }
+                        },
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
+        });
+
+        let mut client = command::Client::new(stream_tx.clone(), id);
         let mut parser = Parser::new();
-
         let mut this_command: Option<OwnedParsedCommand>;
         let mut next_command: Option<OwnedParsedCommand> = None;
+        let sender = db.lock().unwrap().config.logger.sender();
+
         loop {
-            // FIXME: is_incomplete parses the command a second time
             if next_command.is_none() && parser.is_incomplete() {
                 parser.allocate();
                 let len = {
@@ -253,10 +270,10 @@ impl Client {
                     let mut buffer = parser.get_mut();
 
                     // read socket
-                    match self.stream.read(&mut buffer[pos..]) {
+                    match reader.read(&mut buffer[pos..]).await {
                         Ok(r) => r,
                         Err(err) => {
-                            sendlog!(sender, Verbose, "Reading from client: {:?}", err);
+                            // sendlog!(sender, Verbose, "Reading from client: {:?}", err);
                             break;
                         }
                     }
@@ -265,7 +282,7 @@ impl Client {
 
                 // client closed connection
                 if len == 0 {
-                    sendlog!(sender, Verbose, "Client closed connection");
+                    // sendlog!(sender, Verbose, "Client closed connection");
                     break;
                 }
             }
@@ -308,9 +325,9 @@ impl Client {
             };
 
             println!("parsed_command {:?}", parsed_command);
-            
+
             let r = {
-                let mut db = match self.db.lock() {
+                let mut db = match db.lock() {
                     Ok(db) => db,
                     Err(_) => break,
                 };
@@ -333,9 +350,9 @@ impl Client {
                         ResponseError::NoReply => (),
                         // We have to wait until a sender signals us back and then retry
                         // (Repeating the same command is actually wrong because of the timeout)
-                        ResponseError::Wait(ref receiver) => {
+                        ResponseError::Wait(mut receiver) => {
                             // if we receive a None, send a nil, otherwise execute the command
-                            match receiver.recv().unwrap() {
+                            match receiver.recv().await.unwrap() {
                                 Some(cmd) => next_command = Some(cmd),
                                 None => match stream_tx.send(Some(Response::Nil)) {
                                     Ok(_) => (),
@@ -355,77 +372,8 @@ impl Client {
                 break;
             }
         }
-
-        {
-            let mut db = match self.db.lock() {
-                Ok(db) => db,
-                Err(_) => return,
-            };
-
-            for (channel_name, subscriber_id) in client.subscriptions.into_iter() {
-                db.unsubscribe(channel_name.clone(), subscriber_id);
-            }
-        }
     }
-}
 
-macro_rules! handle_listener {
-    ($logger: expr, $listener: expr, $server: expr, $rx: expr, $tcp_keepalive: expr, $timeout: expr, $t: ident) => {{
-        let db = $server.db.clone();
-        let sender = $logger.sender();
-        let next_id = $server.next_id.clone();
-        thread::spawn(move || {
-            for stream in $listener.incoming() {
-                if $rx.try_recv().is_ok() {
-                    // any new message should break
-                    break;
-                }
-                match stream {
-                    Ok(stream) => {
-                        sendlog!(sender, Verbose, "Accepted connection to {:?}", stream).unwrap();
-                        let db1 = db.clone();
-                        let mysender = sender.clone();
-                        let id = {
-                            let mut nid = next_id.lock().unwrap();
-                            *nid += 1;
-                            *nid - 1
-                        };
-                        thread::spawn(move || {
-                            let mut client = Client::$t(stream, db1, id);
-                            client
-                                .stream
-                                .set_keepalive(if $tcp_keepalive > 0 {
-                                    Some(Duration::from_secs($tcp_keepalive as u64))
-                                } else {
-                                    None
-                                })
-                                .unwrap();
-                            client
-                                .stream
-                                .set_read_timeout(if $timeout > 0 {
-                                    Some(Duration::new($timeout, 0))
-                                } else {
-                                    None
-                                })
-                                .unwrap();
-                            client
-                                .stream
-                                .set_write_timeout(if $timeout > 0 {
-                                    Some(Duration::new($timeout, 0))
-                                } else {
-                                    None
-                                })
-                                .unwrap();
-                            client.run(mysender);
-                        });
-                    }
-                    Err(e) => {
-                        sendlog!(sender, Warning, "Accepting client connection: {:?}", e).unwrap()
-                    }
-                }
-            }
-        })
-    }};
 }
 
 impl Server {
@@ -499,7 +447,7 @@ impl Server {
 
     #[cfg(not(windows))]
     fn reuse_address(&self, builder: &TcpBuilder) -> io::Result<()> {
-        try!(builder.reuse_address(true));
+        builder.reuse_address(true)?;
         Ok(())
     }
 
@@ -511,43 +459,37 @@ impl Server {
         }
     }
 
-    /// Listens to a socket address.
-    fn listen<T: ToSocketAddrs>(
-        &mut self,
-        t: T,
-        tcp_keepalive: u32,
-        timeout: u64,
-        tcp_backlog: i32,
-    ) -> io::Result<()> {
-        for addr in try!(t.to_socket_addrs()) {
-            let (tx, rx) = channel();
-            let builder = try!(match addr {
-                SocketAddr::V4(_) => TcpBuilder::new_v4(),
-                SocketAddr::V6(_) => TcpBuilder::new_v6(),
-            });
+    async fn start_listen(addr: &str, db: Arc<Mutex<Database>>, next_id: Arc<Mutex<usize>>) -> Result<(), Box<dyn std::error::Error>>  {
+        use tokio::net::{ TcpStream, TcpListener};
+        use tokio::runtime::Runtime;
+        use tokio::sync::mpsc::{unbounded_channel};
 
-            try!(self.reuse_address(&builder));
-            let listener = try!(try!(builder.bind(addr)).listen(tcp_backlog));
-            self.listener_channels.push(tx);
-            {
-                let db = self.db.lock().unwrap();
-                let th = handle_listener!(
-                    db.config.logger,
-                    listener,
-                    self,
-                    rx,
-                    tcp_keepalive,
-                    timeout,
-                    tcp
-                );
-                self.listener_threads.push(th);
-            }
+        let sender = db.lock().unwrap().config.logger.sender();
+        // let next_id = $server.next_id.clone();
+
+        let mut listener = TcpListener::bind(addr).await?;
+
+        println!("Listening on {:?}", addr);
+
+        loop {
+            let (mut socket, addr) = listener.accept().await?;
+            // let (tx, rx) = unbounded_channel();
+            let id = {
+                let mut nid = next_id.lock().unwrap();
+                *nid += 1;
+                *nid - 1
+            };
+            tokio::spawn(Client::process(socket, db.clone(), id));
         }
+
         Ok(())
     }
 
     /// Starts threads listening to new connections.
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>>  {
+        use tokio::net::{ TcpStream, TcpListener};
+        use tokio::runtime::Runtime;
+
         let (tcp_keepalive, timeout, addresses, tcp_backlog) = {
             let db = self.db.lock().unwrap();
             (
@@ -557,88 +499,25 @@ impl Server {
                 db.config.tcp_backlog.clone(),
             )
         };
-        for (host, port) in addresses {
-            match self.listen((&host[..], port), tcp_keepalive, timeout, tcp_backlog) {
-                Ok(_) => {
-                    let db = self.db.lock().unwrap();
-                    log!(
-                        db.config.logger,
-                        Notice,
-                        "The server is now ready to accept connections on port {}",
-                        port
-                    );
-                }
-                Err(err) => {
-                    let db = self.db.lock().unwrap();
-                    log!(
-                        db.config.logger,
-                        Warning,
-                        "Creating Server TCP listening socket {}:{}: {:?}",
-                        host,
-                        port,
-                        err
-                    );
-                    continue;
-                }
+
+        let mut rt = Runtime::new()?;
+        rt.block_on(async {
+            let mut threads = vec![];
+            for (host, port) in addresses {
+                let addr = format!("{}:{}", host, port);
+                let db = self.db.clone();
+                let next_id = self.next_id.clone();
+                threads.push(tokio::spawn(async move {
+                    Self::start_listen(&addr, db, next_id).await;
+                }));
             }
-        }
 
-        self.handle_unixsocket();
+            for thread in threads {
+                thread.await;
+            }
+        });
 
-        {
-            let (hz_stop_tx, hz_stop_rx) = channel();
-            self.hz_stop = Some(hz_stop_tx);
-            let dblock = self.db.clone();
-            thread::spawn(move || {
-                while hz_stop_rx.try_recv().is_err() {
-                    let mut db = dblock.lock().unwrap();
-                    let hz = db.config.hz.clone();
-                    db.active_expire_cycle(10);
-                    drop(db);
-                    thread::sleep(Duration::from_millis(10000 / hz as u64));
-                }
-            });
-        }
-
-        let mut db = self.db.lock().unwrap();
-        if db.aof.is_some() {
-            command::aof::load(&mut *db);
-        }
-    }
-
-    #[cfg(unix)]
-    fn handle_unixsocket(&mut self) {
-        let db = self.db.lock().unwrap();
-        if let Some(ref unixsocket) = db.config.unixsocket {
-            let tcp_keepalive = db.config.tcp_keepalive;
-            let timeout = db.config.timeout;
-
-            let (tx, rx) = channel();
-            self.listener_channels.push(tx);
-            let listener = match UnixListener::bind(unixsocket) {
-                Ok(l) => l,
-                Err(err) => {
-                    log!(
-                        db.config.logger,
-                        Warning,
-                        "Creating Server Unix socket {}: {:?}",
-                        unixsocket,
-                        err
-                    );
-                    return;
-                }
-            };
-            let th = handle_listener!(
-                db.config.logger,
-                listener,
-                self,
-                rx,
-                tcp_keepalive,
-                timeout,
-                unix
-            );
-            self.listener_threads.push(th);
-        }
+        Ok(())
     }
 
     #[cfg(not(unix))]
@@ -672,107 +551,5 @@ impl Server {
             None => (),
         }
         self.join();
-    }
-}
-
-#[cfg(test)]
-mod test_networking {
-
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-    use std::str::from_utf8;
-    use std::thread;
-
-    use config::Config;
-    use logger::{Level, Logger};
-
-    use super::Server;
-    use std::time::Duration;
-
-    #[test]
-    fn parse_ping() {
-        let port = 16379;
-
-        let mut server = Server::new(Config::default(port, Logger::new(Level::Warning)));
-        server.start();
-
-        let addr = format!("127.0.0.1:{}", port);
-        let streamres = TcpStream::connect(&*addr);
-        assert!(streamres.is_ok());
-        let mut stream = streamres.unwrap();
-        let message = b"*2\r\n$4\r\nping\r\n$4\r\npong\r\n";
-        assert!(stream.write(message).is_ok());
-        let mut h = [0u8; 4];
-        assert!(stream.read(&mut h).is_ok());
-        assert_eq!(from_utf8(&h).unwrap(), "$4\r\n");
-        let mut c = [0u8; 6];
-        assert!(stream.read(&mut c).is_ok());
-        assert_eq!(from_utf8(&c).unwrap(), "pong\r\n");
-        server.stop();
-    }
-
-    #[test]
-    fn allow_multiwrite() {
-        let port = 16380;
-        let mut server = Server::new(Config::default(port, Logger::new(Level::Warning)));
-        server.start();
-
-        let addr = format!("127.0.0.1:{}", port);
-        let streamres = TcpStream::connect(&*addr);
-        assert!(streamres.is_ok());
-        let mut stream = streamres.unwrap();
-        let message = b"*2\r\n$4\r\nping\r\n";
-        assert!(stream.write(message).is_ok());
-        let message = b"$4\r\npong\r\n";
-        assert!(stream.write(message).is_ok());
-        let mut h = [0u8; 4];
-        assert!(stream.read(&mut h).is_ok());
-        assert_eq!(from_utf8(&h).unwrap(), "$4\r\n");
-        let mut c = [0u8; 6];
-        assert!(stream.read(&mut c).is_ok());
-        assert_eq!(from_utf8(&c).unwrap(), "pong\r\n");
-        server.stop();
-    }
-    #[test]
-    fn allow_stop() {
-        let port = 16381;
-        let mut server = Server::new(Config::default(port, Logger::new(Level::Warning)));
-        server.start();
-        {
-            let addr = format!("127.0.0.1:{}", port);
-            let streamres = TcpStream::connect(&*addr);
-            assert!(streamres.is_ok());
-        }
-        server.stop();
-
-        {
-            let addr = format!("127.0.0.1:{}", port);
-            let streamres = TcpStream::connect(&*addr);
-            assert!(streamres.is_err());
-        }
-
-        server.start();
-        {
-            let addr = format!("127.0.0.1:{}", port);
-            let streamres = TcpStream::connect(&*addr);
-            assert!(streamres.is_ok());
-        }
-        server.stop();
-    }
-
-    #[test]
-    fn allow_multiple_clients() {
-        let port = 16382;
-        let mut server = Server::new(Config::default(port, Logger::new(Level::Warning)));
-        server.start();
-
-        let addr = format!("127.0.0.1:{}", port);
-        let _ = TcpStream::connect(&*addr);
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(*server.next_id.lock().unwrap(), 1);
-        let _ = TcpStream::connect(&*addr);
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(*server.next_id.lock().unwrap(), 2);
-        server.stop();
     }
 }

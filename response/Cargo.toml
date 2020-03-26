@@ -3,5 +3,8 @@ name = "response"
 version = "0.1.0"
 authors = ["Sebastian Waisbrot <seppo0010@gmail.com>"]
 
+[dependencies]
+tokio = { version = "0.2.13", features = ["full"] }
+
 [dependencies.parser]
 path = "../parser"

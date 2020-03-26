@@ -1,7 +1,9 @@
 extern crate parser;
+extern crate tokio;
 
 use std::fmt::{Debug, Error, Formatter};
-use std::sync::mpsc::Receiver;
+// use std::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender};
 
 use parser::OwnedParsedCommand;
 
