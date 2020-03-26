@@ -309,7 +309,7 @@ impl ValueSortedSet {
         };
 
         for _ in 0..count {
-            let el = skiplist.remove_index(&pos);
+            let el = skiplist.remove_index(pos);
             hmap.remove(&el.s);
         }
         count
@@ -327,7 +327,7 @@ impl ValueSortedSet {
         };
 
         for _ in 0..count {
-            let el = skiplist.remove_index(&pos);
+            let el = skiplist.remove_index(pos);
             hmap.remove(&el.s);
         }
         count
@@ -399,7 +399,7 @@ impl ValueSortedSet {
         };
 
         for _ in 0..(stop - start + 1) {
-            let el = skiplist.remove_index(&start);
+            let el = skiplist.remove_index(start);
             hmap.remove(&el.s);
         }
         stop - start + 1
@@ -415,7 +415,7 @@ impl ValueSortedSet {
             return vec![];
         }
 
-        let first = skiplist.get(&start).unwrap();
+        let first = skiplist.get(start).unwrap();
         let mut r = vec![];
         if rev {
             for member in skiplist

@@ -307,15 +307,15 @@ impl Client {
                 }
             };
 
-            let mut db = match self.db.lock() {
-                Ok(db) => db,
-                Err(_) => break,
+            println!("parsed_command {:?}", parsed_command);
+            
+            let r = {
+                let mut db = match self.db.lock() {
+                    Ok(db) => db,
+                    Err(_) => break,
+                };
+                command::command(parsed_command, &mut *db, &mut client)
             };
-
-            // execute the command
-            let r = command::command(parsed_command, &mut *db, &mut client);
-            // unlock the db
-            drop(db);
 
             // check out the response
             match r {

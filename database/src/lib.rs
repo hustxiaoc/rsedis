@@ -56,6 +56,7 @@ pub enum Value {
     List(ValueList),
     Set(ValueSet),
     SortedSet(ValueSortedSet),
+    Map(HashMap<Vec<u8>, Vec<u8>>),
 }
 
 /// Events relevant for clients in pubsub mode
@@ -202,6 +203,13 @@ impl Value {
     pub fn is_list(&self) -> bool {
         match *self {
             Value::List(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_map(&self) -> bool {
+        match *self {
+            Value::Map(_) => true,
             _ => false,
         }
     }
@@ -566,6 +574,38 @@ impl Value {
         })
     }
 
+    pub fn hset(&mut self, key: Vec<u8>, val: Vec<u8>) -> Result<usize, OperationError> {
+        Ok(match *self {
+            Value::Nil => {
+                let mut map = HashMap::new();
+                map.insert(key, val);
+                *self = Value::Map(map);
+                1
+            },
+
+            Value::Map(ref mut map) => {
+                map.insert(key, val);
+                0
+            },
+
+            _ => return Err(OperationError::WrongTypeError),
+        })
+    }
+
+    pub fn hget(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>, OperationError> {
+        Ok(match *self {
+            Value::Nil => None,
+
+            Value::Map(ref map) => {
+                match map.get(&key) {
+                    Some(val) => Some(val.to_vec()),
+                    _ => None,
+                }
+            },
+
+            _ => return Err(OperationError::WrongTypeError),
+        })
+    }
     /// Takes an element from a list.
     ///
     /// # Examples
@@ -1628,6 +1668,7 @@ impl Value {
         let mut data = vec![];
         match *self {
             Value::Nil => return Ok(0), // maybe panic instead?
+            Value::Map(ref m) => return Ok(1),
             Value::String(ref s) => try!(s.dump(&mut data)),
             Value::List(ref l) => try!(l.dump(&mut data)),
             Value::Set(ref s) => try!(s.dump(&mut data)),
@@ -1643,6 +1684,7 @@ impl Value {
             Value::Nil => "Value at:0x0000000000 refcount:0 encoding:nil serializedlength:0 lru:0 \
                            lru_seconds_idle:0"
                 .to_owned(),
+            Value::Map(ref m) => "map".to_owned(),
             Value::String(ref s) => s.debug_object(),
             Value::List(ref l) => l.debug_object().to_owned(),
             Value::Set(ref s) => s.debug_object().to_owned(),
@@ -1654,6 +1696,7 @@ impl Value {
         match *self {
             Value::Nil => true,
             Value::String(_) => false,
+            Value::Map(ref m) => m.is_empty(),
             Value::List(ref l) => l.llen() == 0,
             Value::Set(ref s) => s.scard() == 0,
             Value::SortedSet(ref s) => s.zcard() == 0,

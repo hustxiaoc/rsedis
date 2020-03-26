@@ -354,6 +354,7 @@ fn dbtype(parser: &mut ParsedCommand, db: &Database, dbindex: usize) -> Response
             &Value::Nil => Response::Data("none".to_owned().into_bytes()),
             &Value::String(_) => Response::Data("string".to_owned().into_bytes()),
             &Value::List(_) => Response::Data("list".to_owned().into_bytes()),
+            &Value::Map(_) => Response::Data("map".to_owned().into_bytes()),
             &Value::Set(_) => Response::Data("set".to_owned().into_bytes()),
             &Value::SortedSet(_) => Response::Data("zset".to_owned().into_bytes()),
         },
@@ -655,6 +656,36 @@ fn pfmerge(parser: &ParsedCommand, db: &mut Database, dbindex: usize) -> Respons
     db.key_updated(dbindex, &key);
     r
 }
+
+fn hset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 4, "Wrong number of parameters, expected 4");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
+    let val = try_validate!(parser.get_vec(3), "Invalid key");
+    let el = db.get_or_create(dbindex, &key);
+    match el.hset(subkey, val) {
+        Ok(ret) => Response::Integer(ret as i64),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+fn hget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 3, "Wrong number of parameters, expected 3");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
+
+    let el = match db.get(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Nil,
+    };
+
+    match el.hget(subkey) {
+        Ok(None) => return Response::Nil,
+        Ok(Some(r)) => return Response::Data(r),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
 
 fn generic_push(
     parser: &mut ParsedCommand,
@@ -2735,6 +2766,8 @@ fn execute_command(
     }
     let dbindex = client.dbindex.clone();
     return Ok(match command_name {
+        "hset" => hset(parser, db, dbindex),
+        "hget" => hget(parser, db, dbindex),
         "pexpireat" => pexpireat(parser, db, dbindex),
         "pexpire" => pexpire(parser, db, dbindex),
         "expireat" => expireat(parser, db, dbindex),

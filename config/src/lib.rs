@@ -110,7 +110,7 @@ impl Config {
     }
 
     pub fn new(logger: Logger) -> Config {
-        Self::default(6379, logger)
+        Self::default(6879, logger)
     }
 
     pub fn parsefile(&mut self, fname: String) -> Result<(), ConfigError> {
