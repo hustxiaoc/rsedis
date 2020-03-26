@@ -19,7 +19,6 @@ use tokio::sync::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use std::sync::{Arc};
-use std::thread;
 use std::time::Duration;
 
 use config::Config;
