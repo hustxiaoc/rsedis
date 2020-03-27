@@ -69,11 +69,11 @@
     - [x] zrank
     - [x] zrevrank
     - [ ] zscan
-    - [ ] hset
+    - [x] hset
     - [ ] hsetnx
-    - [ ] hget
+    - [x] hget
     - [ ] hmset
-    - [ ] hmget
+    - [x] hmget
     - [ ] hincrby
     - [ ] hincrbyfloat
     - [ ] hdel
@@ -81,7 +81,7 @@
     - [ ] hstrlen
     - [ ] hkeys
     - [ ] hvals
-    - [ ] hgetall
+    - [x] hgetall
     - [ ] hexists
     - [ ] hscan
     - [x] incrby
