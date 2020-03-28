@@ -11,11 +11,7 @@ To learn Rust.
 
 ## Use Cases
 
-rsedis does not rely on UNIX-specific features. Windows users can run it as a
-replacement of Redis.
-
-rsedis uses multiple threads which may be more useful in machines with multiple
-cores.
+rsedis uses multiple threads (tokio threadpool) for handling client io and one single thread for data manage.
 
 ## Prerequisites
 

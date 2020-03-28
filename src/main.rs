@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Port: {}", port);
         println!("PID: {}", getpid());
     }
-    server.start().await?;
+    server.start(Config::new(Logger::new(Level::Notice))).await?;
 
     Ok(())
 }

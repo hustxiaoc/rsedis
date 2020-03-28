@@ -8,18 +8,25 @@ extern crate parser;
 extern crate response;
 extern crate util;
 
+use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::net::{ TcpStream, TcpListener};
 use tokio::sync::{
+    oneshot,
     Mutex, MutexGuard,
     mpsc::{unbounded_channel}
 };
+use tokio::sync::oneshot::{Sender, Receiver};
+use tokio::sync::mpsc::{ UnboundedReceiver, UnboundedSender};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::runtime;
 
 use std::sync::{Arc};
 use std::time::Duration;
+use std::thread;
+use std::sync::mpsc::channel;
 
 use config::Config;
 use database::Database;
@@ -37,7 +44,13 @@ pub struct Server {
     pub next_id: Arc<Mutex<usize>>,
 }
 
-async fn process_client_request(mut stream: TcpStream, db: Arc<Mutex<Database>>, id: usize) {
+enum WorkerMessage {
+    ClientRegister(command::Client),
+    ClientDeRegister(usize),
+    Request(usize, OwnedParsedCommand),
+}
+
+async fn process_client_request(mut stream: TcpStream, db: Arc<Mutex<Database>>, id: usize, tx: UnboundedSender<WorkerMessage>) {
 
     let (stream_tx, mut rx) = unbounded_channel::<Option<Response>>();
     let (mut reader, mut writer) = tokio::io::split(stream);
@@ -65,6 +78,8 @@ async fn process_client_request(mut stream: TcpStream, db: Arc<Mutex<Database>>,
     let mut next_command: Option<OwnedParsedCommand> = None;
     let sender = db.lock().await.config.logger.sender();
 
+    tx.send(WorkerMessage::ClientRegister(client));
+
     loop {
         if next_command.is_none() && parser.is_incomplete() {
             parser.allocate();
@@ -77,17 +92,20 @@ async fn process_client_request(mut stream: TcpStream, db: Arc<Mutex<Database>>,
                     Ok(r) => r,
                     Err(err) => {
                         // sendlog!(sender, Verbose, "Reading from client: {:?}", err);
-                        break;
+                        0
                     }
                 }
             };
-            parser.written += len;
 
             // client closed connection
             if len == 0 {
+                stream_tx.send(None);
+                tx.send(WorkerMessage::ClientDeRegister(id));
                 // sendlog!(sender, Verbose, "Client closed connection");
                 break;
             }
+
+            parser.written += len;
         }
 
         // was there an error during the execution?
@@ -96,7 +114,8 @@ async fn process_client_request(mut stream: TcpStream, db: Arc<Mutex<Database>>,
         this_command = next_command;
         next_command = None;
 
-        // try to parse received command
+        // println!("parsed_command {:?}", parsed_command);
+
         let parsed_command = match this_command {
             Some(ref c) => c.get_command(),
             None => {
@@ -127,48 +146,7 @@ async fn process_client_request(mut stream: TcpStream, db: Arc<Mutex<Database>>,
             }
         };
 
-        println!("parsed_command {:?}", parsed_command);
-
-        let mut db = db.lock().await;
-        let r = command::command(parsed_command, &mut *db, &mut client);
-
-        // check out the response
-        match r {
-            // received a response, send it to the client
-            Ok(response) => {
-                match stream_tx.send(Some(response)) {
-                    Ok(_) => (),
-                    Err(_) => error = true,
-                };
-            }
-            // no response
-            Err(err) => {
-                match err {
-                    // There is no reply to send, that's ok
-                    ResponseError::NoReply => (),
-                    // We have to wait until a sender signals us back and then retry
-                    // (Repeating the same command is actually wrong because of the timeout)
-                    ResponseError::Wait(mut receiver) => {
-                        // if we receive a None, send a nil, otherwise execute the command
-                        match receiver.recv().await.unwrap() {
-                            Some(cmd) => next_command = Some(cmd),
-                            None => match stream_tx.send(Some(Response::Nil)) {
-                                Ok(_) => (),
-                                Err(_) => error = true,
-                            },
-                        }
-                    }
-                }
-            }
-        }
-
-        // if something failed, let's shut down the client
-        if error {
-            // kill threads
-            stream_tx.send(None);
-            client.rawsender.send(None);
-            break;
-        }
+        tx.send(WorkerMessage::Request((id), parsed_command.into_owned()));
     }
 }
 
@@ -187,7 +165,7 @@ impl Server {
         self.db.lock().await
     }
 
-    async fn start_listen(addr: &str, db: Arc<Mutex<Database>>, next_id: Arc<Mutex<usize>>) -> Result<(), Box<dyn std::error::Error>>  {
+    async fn start_listen(addr: &str, db: Arc<Mutex<Database>>, next_id: Arc<Mutex<usize>>, tx: UnboundedSender<WorkerMessage>) -> Result<(), Box<dyn std::error::Error>>  {
 
         let sender = db.lock().await.config.logger.sender();
 
@@ -202,14 +180,54 @@ impl Server {
                 *nid += 1;
                 *nid - 1
             };
-            tokio::spawn(process_client_request(socket, db.clone(), id));
+            tokio::spawn(process_client_request(socket, db.clone(), id, tx.clone()));
         }
 
         Ok(())
     }
 
-    pub async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>>  {
-        use tokio::net::{ TcpStream, TcpListener};
+    pub async fn start(&mut self, config: Config) -> Result<(), Box<dyn std::error::Error>>  {
+
+        let (tx, mut rx) = unbounded_channel::<WorkerMessage>();
+        // 开启db线程
+        thread::Builder::new().name("db_thread".to_string()).spawn(move || {
+            let mut rt = runtime::Builder::new().basic_scheduler().build().unwrap();
+            rt.block_on(async move {
+                let mut db = Database::new(config);
+                let mut clients = HashMap::new();
+                loop {
+                    match rx.recv().await {
+                        Some(WorkerMessage::ClientRegister(client)) => {
+                            println!("client register");
+                            clients.insert(client.id, client);
+                        },
+
+                        Some(WorkerMessage::ClientDeRegister(id)) => {
+                            println!("client deregister");
+                            clients.remove(&id);
+                        },
+
+                        Some(WorkerMessage::Request(id, cmd)) => {
+                            let mut client = clients.get_mut(&id).unwrap();
+                            let r = command::command(cmd.get_command(), &mut db, &mut client);
+                            // let r = command::command1(cmd.get_command(), &mut db);
+
+                            match r {
+                                Ok(response) => {
+                                    client.rawsender.send(Some(response));
+                                },
+                                _ => {
+
+                                }
+                            }
+                        },
+                        None => {
+
+                        }
+                    }
+                }
+            });
+        });
 
         let (tcp_keepalive, timeout, addresses, tcp_backlog) = {
             let db = self.db.lock().await;
@@ -226,8 +244,9 @@ impl Server {
             let addr = format!("{}:{}", host, port);
             let db = self.db.clone();
             let next_id = self.next_id.clone();
+            let txx = tx.clone();
             threads.push(tokio::spawn(async move {
-                Self::start_listen(&addr, db, next_id).await;
+                Self::start_listen(&addr, db, next_id, txx).await;
             }));
         }
 

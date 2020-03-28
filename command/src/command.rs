@@ -659,7 +659,7 @@ fn pfmerge(parser: &ParsedCommand, db: &mut Database, dbindex: usize) -> Respons
 }
 
 fn hset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
-    validate!(parser.argv.len() == 4, "Wrong number of parameters, expected 4");
+    validate!(parser.argv.len() == 4, "Wrong number of parameters for HSET");
     let key = try_validate!(parser.get_vec(1), "Invalid key");
     let subkey = try_validate!(parser.get_vec(2), "Invalid key");
     let val = try_validate!(parser.get_vec(3), "Invalid key");
@@ -668,6 +668,24 @@ fn hset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respon
         Ok(ret) => Response::Integer(ret as i64),
         Err(err) => Response::Error(err.to_string()),
     }
+}
+
+fn hmset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() >= 3, "Wrong number of parameters for HMSET");
+    validate!(parser.argv.len() % 2 == 0, "Wrong number of parameters for HMSET");
+
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let el = db.get_or_create(dbindex, &key);
+
+    for i in (2..parser.argv.len()).step_by(2) {
+        let k = try_validate!(parser.get_vec(i), "Invalid value");
+        let v = try_validate!(parser.get_vec(i + 1), "Invalid value");
+        match el.hset(k, v) {
+            Ok(_) => {},
+            Err(err) => return Response::Error(err.to_string()),
+        }
+    }
+    Response::Status("OK".to_owned())
 }
 
 fn hget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
@@ -688,7 +706,7 @@ fn hget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respon
 }
 
 fn hgetall(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
-    validate!(parser.argv.len() == 2, "Wrong number of parameters, expected 2");
+    validate!(parser.argv.len() == 2, "Wrong number of parameters for HGETALL");
     let key = try_validate!(parser.get_vec(1), "Invalid key");
     let el = match db.get(dbindex, &key) {
         Some(el) => el,
@@ -2816,6 +2834,7 @@ fn execute_command(
         "hget" => hget(parser, db, dbindex),
         "hgetall" => hgetall(parser, db, dbindex),
         "hmget" => hmget(parser, db, dbindex),
+        "hmset" => hmset(parser, db, dbindex),
         "pexpireat" => pexpireat(parser, db, dbindex),
         "pexpire" => pexpire(parser, db, dbindex),
         "expireat" => expireat(parser, db, dbindex),
@@ -2952,6 +2971,7 @@ fn execute_command(
         cmd => Response::Error(format!("ERR unknown command \"{}\"", cmd).to_owned()),
     });
 }
+
 
 pub fn command(
     mut parser: ParsedCommand,

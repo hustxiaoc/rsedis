@@ -72,7 +72,7 @@
     - [x] hset
     - [ ] hsetnx
     - [x] hget
-    - [ ] hmset
+    - [x] hmset
     - [x] hmget
     - [ ] hincrby
     - [ ] hincrbyfloat
