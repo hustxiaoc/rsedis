@@ -47,6 +47,7 @@ use rdbutil::encode_u64_to_slice_u8;
 use set::ValueSet;
 use string::ValueString;
 use zset::ValueSortedSet;
+use std::str::{from_utf8, Utf8Error};
 
 const ACTIVE_EXPIRE_CYCLE_LOOKUPS_PER_LOOP: usize = 20;
 
@@ -595,6 +596,55 @@ impl Value {
         })
     }
 
+    pub fn hincrby(&mut self, key: Vec<u8>, val: i64) -> Result<Vec<u8>, OperationError> {
+        Ok(match *self {
+            Value::Nil => {
+                let mut map = HashMap::new();
+                let value = format!("{}", val).as_bytes().to_vec();
+                map.insert(key, value.clone());
+                *self = Value::Map(map);
+                value
+            },
+
+            Value::Map(ref mut map) => {
+                let old: i64 = match map.get(&key) {
+                    Some(val) => from_utf8(&val)?.parse::<i64>()?,
+                    _ => {
+                        0
+                    },
+                };
+                let value = format!("{}", old + val).as_bytes().to_vec();
+                map.insert(key, value.clone());
+                value
+            },
+
+            _ => return Err(OperationError::WrongTypeError),
+        })
+    }
+
+    pub fn hsetnx(&mut self, key: Vec<u8>, val: Vec<u8>) -> Result<usize, OperationError> {
+        Ok(match *self {
+            Value::Nil => {
+                let mut map = HashMap::new();
+                map.insert(key, val);
+                *self = Value::Map(map);
+                1
+            },
+
+            Value::Map(ref mut map) => {
+                match map.get(&key) {
+                    Some(val) => 0,
+                    _ => {
+                        map.insert(key, val);
+                        1
+                    },
+                }
+            },
+
+            _ => return Err(OperationError::WrongTypeError),
+        })
+    }
+
     pub fn hget(&self, key: Vec<u8>) -> Result<Option<Vec<u8>>, OperationError> {
         Ok(match *self {
             Value::Nil => None,
@@ -606,6 +656,20 @@ impl Value {
                 }
             },
 
+            _ => return Err(OperationError::WrongTypeError),
+        })
+    }
+
+    pub fn hdel(&mut self, key: Vec<u8>) -> Result<bool, OperationError> {
+        Ok(match *self {
+            Value::Nil => false,
+
+            Value::Map(ref mut map) => {
+                match map.remove(&key) {
+                    Some(val) => true,
+                    None => false,
+                }
+            },
             _ => return Err(OperationError::WrongTypeError),
         })
     }

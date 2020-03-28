@@ -70,13 +70,13 @@
     - [x] zrevrank
     - [ ] zscan
     - [x] hset
-    - [ ] hsetnx
+    - [x] hsetnx
     - [x] hget
     - [x] hmset
     - [x] hmget
-    - [ ] hincrby
+    - [x] hincrby
     - [ ] hincrbyfloat
-    - [ ] hdel
+    - [x] hdel
     - [ ] hlen
     - [ ] hstrlen
     - [ ] hkeys

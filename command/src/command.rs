@@ -1,8 +1,6 @@
 use std::collections::{Bound, HashMap, HashSet};
 use std::io::Write;
 use std::mem::replace;
-// use std::sync::mpsc::channel;
-// use std::sync::mpsc::Sender;
 use tokio::sync::mpsc::{unbounded_channel as channel, UnboundedReceiver, UnboundedSender as Sender};
 use std::thread;
 use std::time::Duration;
@@ -670,6 +668,32 @@ fn hset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respon
     }
 }
 
+fn hsetnx(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 4, "Wrong number of parameters for HSET");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
+    let val = try_validate!(parser.get_vec(3), "Invalid key");
+    let el = db.get_or_create(dbindex, &key);
+    match el.hsetnx(subkey, val) {
+        Ok(ret) => Response::Integer(ret as i64),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+
+// HINCRBY key field increment
+fn hincrby(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 4, "Wrong number of parameters for HSET");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
+    let val = try_validate!(parser.get_i64(3), "ERR value is not an integer or out of range");
+    let el = db.get_or_create(dbindex, &key);
+    match el.hincrby(subkey, val) {
+        Ok(r) => return Response::Data(r),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
 fn hmset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
     validate!(parser.argv.len() >= 3, "Wrong number of parameters for HMSET");
     validate!(parser.argv.len() % 2 == 0, "Wrong number of parameters for HMSET");
@@ -688,8 +712,9 @@ fn hmset(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respo
     Response::Status("OK".to_owned())
 }
 
+
 fn hget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
-    validate!(parser.argv.len() == 3, "Wrong number of parameters, expected 3");
+    validate!(parser.argv.len() == 3, "Wrong number of parameters for HGET");
     let key = try_validate!(parser.get_vec(1), "Invalid key");
     let subkey = try_validate!(parser.get_vec(2), "Invalid key");
 
@@ -704,6 +729,25 @@ fn hget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respon
         Err(err) => Response::Error(err.to_string()),
     }
 }
+
+fn hdel(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 3, "Wrong number of parameters for HDEL");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
+
+    let mut el = match db.get_mut(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Integer(0),
+    };
+
+    match el.hdel(subkey) {
+        Ok(true) => return Response::Integer(1),
+        Ok(false) => return Response::Integer(0),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+
 
 fn hgetall(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
     validate!(parser.argv.len() == 2, "Wrong number of parameters for HGETALL");
@@ -2832,9 +2876,12 @@ fn execute_command(
     return Ok(match command_name {
         "hset" => hset(parser, db, dbindex),
         "hget" => hget(parser, db, dbindex),
+        "hsetnx" => hsetnx(parser, db, dbindex),
         "hgetall" => hgetall(parser, db, dbindex),
         "hmget" => hmget(parser, db, dbindex),
         "hmset" => hmset(parser, db, dbindex),
+        "hdel" => hdel(parser, db, dbindex),
+        "hincrby" => hincrby(parser, db, dbindex),
         "pexpireat" => pexpireat(parser, db, dbindex),
         "pexpire" => pexpire(parser, db, dbindex),
         "expireat" => expireat(parser, db, dbindex),

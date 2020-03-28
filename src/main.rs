@@ -25,11 +25,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (port, daemonize) = (config.port, config.daemonize);
     let mut server = Server::new(config);
     {
-        let mut db = server.get_mut_db().await;
-        db.git_sha1 = GIT_SHA1;
-        db.git_dirty = GIT_DIRTY;
-        db.version = env!("CARGO_PKG_VERSION");
-        db.rustc_version = RUSTC_VERSION;
+        // let mut db = server.get_mut_db().await;
+        // db.git_sha1 = GIT_SHA1;
+        // db.git_dirty = GIT_DIRTY;
+        // db.version = env!("CARGO_PKG_VERSION");
+        // db.rustc_version = RUSTC_VERSION;
     }
 
     if !daemonize {
