@@ -77,12 +77,12 @@
     - [x] hincrby
     - [ ] hincrbyfloat
     - [x] hdel
-    - [ ] hlen
-    - [ ] hstrlen
-    - [ ] hkeys
-    - [ ] hvals
+    - [x] hlen
+    - [x] hstrlen
+    - [x] hkeys
+    - [x] hvals
     - [x] hgetall
-    - [ ] hexists
+    - [x] hexists
     - [ ] hscan
     - [x] incrby
     - [x] decrby

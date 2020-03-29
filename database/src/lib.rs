@@ -660,6 +660,17 @@ impl Value {
         })
     }
 
+    pub fn hexists(&mut self, key: Vec<u8>) -> Result<bool, OperationError> {
+        Ok(match *self {
+            Value::Nil => false,
+
+            Value::Map(ref mut map) => {
+                map.contains_key(&key)
+            },
+            _ => return Err(OperationError::WrongTypeError),
+        })
+    }
+
     pub fn hdel(&mut self, key: Vec<u8>) -> Result<bool, OperationError> {
         Ok(match *self {
             Value::Nil => false,
@@ -675,21 +686,62 @@ impl Value {
     }
 
     pub fn hgetall(&self) -> Result<Vec<Vec<u8>>, OperationError> {
-        let mut list = vec![];
+        let mut arr = vec![];
 
         match *self {
             Value::Nil => {},
             Value::Map(ref map) => {
                 for (key, val) in map {
-                    list.push(key.to_vec());
-                    list.push(val.to_vec());
+                    arr.push(key.to_vec());
+                    arr.push(val.to_vec());
                 }
             },
             _ => return Err(OperationError::WrongTypeError)
         };
 
-        Ok(list)
+        Ok(arr)
     }
+
+    pub fn hkeys(&self) -> Result<Vec<Vec<u8>>, OperationError> {
+        let mut arr = vec![];
+
+        match *self {
+            Value::Nil => {},
+            Value::Map(ref map) => {
+                for key in map.keys() {
+                    arr.push(key.to_vec());
+                }
+            },
+            _ => return Err(OperationError::WrongTypeError)
+        };
+
+        Ok(arr)
+    }
+
+    pub fn hvals(&self) -> Result<Vec<Vec<u8>>, OperationError> {
+        let mut arr = vec![];
+
+        match *self {
+            Value::Nil => {},
+            Value::Map(ref map) => {
+                for val in map.values() {
+                    arr.push(val.to_vec());
+                }
+            },
+            _ => return Err(OperationError::WrongTypeError)
+        };
+
+        Ok(arr)
+    }
+
+    pub fn hlen(&self) -> Result<usize, OperationError> {
+        Ok(match *self {
+            Value::Nil => 0,
+            Value::Map(ref map) => map.len(),
+            _ => return Err(OperationError::WrongTypeError)
+        })
+    }
+
     /// Takes an element from a list.
     ///
     /// # Examples

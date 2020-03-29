@@ -59,7 +59,6 @@ async fn process_client_request(mut stream: TcpStream, id: usize, tx: UnboundedS
     let mut parser = Parser::new();
     let mut this_command: Option<OwnedParsedCommand>;
     let mut next_command: Option<OwnedParsedCommand> = None;
-    // let sender = db.lock().await.config.logger.sender();
 
     tx.send(WorkerMessage::ClientRegister(client));
 
@@ -169,17 +168,16 @@ impl Server {
         let addresses = config.addresses();
         println!("main thread {:?}", thread::current().id());
 
-        let time_tx = tx.clone();
+        let timer_tx = tx.clone();
 
         tokio::spawn(async move {
-            println!("time thread {:?}", thread::current().id());
-
             loop {
                 delay_for(Duration::from_millis(1000 * 3)).await;
-                time_tx.send(WorkerMessage::CheckExpire);
+                println!("timer_tx thread {:?}", thread::current().id());
+                timer_tx.send(WorkerMessage::CheckExpire);
             }
         });
-        
+
         tokio::spawn(async move {
             let mut clients = HashMap::new();
             let mut db = Database::new(config);
@@ -220,18 +218,6 @@ impl Server {
                 }
             }
         });
-
-        // thread::Builder::new().name("db_thread".to_string()).spawn(move || {
-        //     let mut rt = runtime::Builder::new().basic_scheduler().enable_time().build().unwrap();
-        //
-        //     rt.spawn(async move {
-        //
-        //     });
-        //
-        //     rt.block_on(async move {
-        //
-        //     });
-        // });
 
         let mut list = vec![];
         for (host, port) in addresses {

@@ -5,6 +5,7 @@ use tokio::sync::mpsc::{unbounded_channel as channel, UnboundedReceiver, Unbound
 use std::thread;
 use std::time::Duration;
 use std::usize;
+use std::str::{from_utf8, Utf8Error};
 
 use compat::{getos, getpid};
 use database::{zset, Database, PubsubEvent, Value};
@@ -747,7 +748,44 @@ fn hdel(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Respon
     }
 }
 
+fn hexists(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 3, "Wrong number of parameters for hexists");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
 
+    let mut el = match db.get_mut(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Integer(0),
+    };
+
+    match el.hexists(subkey) {
+        Ok(true) => return Response::Integer(1),
+        Ok(false) => return Response::Integer(0),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+fn hstrlen(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 3, "Wrong number of parameters for hstrlen");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let subkey = try_validate!(parser.get_vec(2), "Invalid key");
+
+    let el = match db.get(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Integer(0),
+    };
+
+    match el.hget(subkey) {
+        Ok(None) => return Response::Integer(0),
+        Ok(Some(r)) => {
+            match from_utf8(&r) {
+                Ok(s) => return Response::Integer(s.len() as i64),
+                Err(err) => Response::Error(err.to_string()),
+            }
+        }
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
 
 fn hgetall(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
     validate!(parser.argv.len() == 2, "Wrong number of parameters for HGETALL");
@@ -768,6 +806,62 @@ fn hgetall(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Res
         Err(err) => Response::Error(err.to_string()),
     }
 }
+
+
+fn hkeys(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 2, "Wrong number of parameters for hkeys");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let el = match db.get(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Array(Vec::new()),
+    };
+
+    match el.hkeys() {
+        Ok(items) => {
+            if items.len() > 0 {
+                Response::Array(items.iter().map(|i| Response::Data(i.to_vec())).collect())
+            } else {
+                Response::Array(Vec::new())
+            }
+        }
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+fn hvals(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 2, "Wrong number of parameters for hkeys");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let el = match db.get(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Array(Vec::new()),
+    };
+
+    match el.hvals() {
+        Ok(items) => {
+            if items.len() > 0 {
+                Response::Array(items.iter().map(|i| Response::Data(i.to_vec())).collect())
+            } else {
+                Response::Array(Vec::new())
+            }
+        }
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
+fn hlen(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
+    validate!(parser.argv.len() == 2, "Wrong number of parameters for HLEN");
+    let key = try_validate!(parser.get_vec(1), "Invalid key");
+    let el = match db.get(dbindex, &key) {
+        Some(el) => el,
+        None => return Response::Integer(0),
+    };
+
+    match el.hlen() {
+        Ok(len) => return Response::Integer(len as i64),
+        Err(err) => Response::Error(err.to_string()),
+    }
+}
+
 
 fn hmget(parser: &mut ParsedCommand, db: &mut Database, dbindex: usize) -> Response {
     validate!(parser.argv.len() >= 3, "Wrong number of parameters, expected at least 3");
@@ -2878,7 +2972,12 @@ fn execute_command(
         "hget" => hget(parser, db, dbindex),
         "hsetnx" => hsetnx(parser, db, dbindex),
         "hgetall" => hgetall(parser, db, dbindex),
+        "hexists" => hexists(parser, db, dbindex),
+        "hstrlen" => hstrlen(parser, db, dbindex),
         "hmget" => hmget(parser, db, dbindex),
+        "hkeys" => hkeys(parser, db, dbindex),
+        "hvals" => hvals(parser, db, dbindex),
+        "hlen" => hlen(parser, db, dbindex),
         "hmset" => hmset(parser, db, dbindex),
         "hdel" => hdel(parser, db, dbindex),
         "hincrby" => hincrby(parser, db, dbindex),
